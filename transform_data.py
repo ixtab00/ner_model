@@ -48,3 +48,29 @@ class DataTransformer():
 
         vocab = {word: index for word, index in zip(popular_words, range(1, self.vocab_size+1))}
         return vocab
+    
+    def get_char_vocab(self, words: List) -> Dict:
+        line = ''.join(words)
+        chars = list(set(line))
+
+        char_to_idx = {char: idx for char, idx in zip(chars, range(len(chars)))}
+        return char_to_idx
+    
+    def encode_chars(self, dataset: List[List], char_to_idx: Dict):
+        sentence_maxlen = 0
+        word_maxlen = 0
+        for sentence in dataset:
+            for word in sentence:
+                word_maxlen = len(word) if len(word) > word_maxlen else word_maxlen
+            sentence_maxlen = len(sentence) if len(sentence) > sentence_maxlen else sentence_maxlen
+
+        transformed_dataset = np.zeros((len(dataset), sentence_maxlen, word_maxlen))
+
+        print("Encoding dataset...")
+        for i, sentence in tqdm(enumerate(dataset)):
+            for j, word in enumerate(sentence):
+                for k, char in enumerate(word):
+                    transformed_dataset[i][j][k] = char_to_idx[char]
+        print(f"Finished. Shape is {transformed_dataset.shape}")
+        
+        return transformed_dataset
