@@ -1,1 +1,1 @@
-{"I-gpe": 1, "I-geo": 2, "I-per": 3, "B-eve": 4, "B-per": 5, "B-org": 6, "I-nat": 7, "B-geo": 8, "I-org": 9, "B-nat": 10, "B-tim": 11, "B-art": 12, "O": 13, "I-art": 14, "I-tim": 15, "I-eve": 16, "B-gpe": 17}
+{"O": 1, "I-geo": 2, "B-art": 3, "I-eve": 4, "I-gpe": 5, "B-eve": 6, "I-art": 7, "B-org": 8, "I-per": 9, "I-org": 10, "I-nat": 11, "B-tim": 12, "B-gpe": 13, "I-tim": 14, "B-nat": 15, "B-geo": 16, "B-per": 17}

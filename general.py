@@ -1,12 +1,12 @@
 import string
 
 CASING_LOOKUP = {
-    'numeric':0,
+    'numeric':5,
     'all_upper':1,
     'all_lower':2,
     'initial_upper':3,
     'other':4,
-    'PAD':5
+    'PAD':0
 }
 
 chars = list(string.ascii_letters + string.punctuation + string.digits)

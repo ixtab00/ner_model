@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import List
-from general import CHAR_LOOKUP
+from general import CHAR_LOOKUP, CASING_LOOKUP
 from tqdm import tqdm
 from keras.utils import pad_sequences
 
@@ -36,12 +36,15 @@ class DataLoader:
         labels = []
         encoded_sentences = []
         encoded_words = []
+        encoded_casings = []
         for sentence in tqdm(sentences):
             words, tags = self.__split_tags_and_words(sentence)
             cur_labels = [self.tag_to_idx[tag] for tag in tags]
             labels.append(cur_labels)
-            cur_sentences = self.__encode_sentence(sentence)
+            cur_sentences = self.__encode_sentence(words)
             encoded_sentences.append(cur_sentences)
+            cur_casing = self.__get_casing(words)
+            encoded_casings.append(cur_casing)
             chars = []
             for word in words:
                 chars.append(self.__encode_word(word))
@@ -49,16 +52,20 @@ class DataLoader:
         
         encoded_words = pad_sequences(encoded_words, self.max_sent_len, padding='post')
         encoded_sentences = pad_sequences(encoded_sentences, self.max_sent_len, padding='post')
+        encoded_casings = pad_sequences(encoded_casings, self.max_sent_len, padding='post')
         labels = pad_sequences(labels, self.max_sent_len, padding='post', value=self.tag_to_idx['O'])
-        return np.asarray(encoded_words, dtype='int32'), np.asarray(encoded_sentences, dtype='int32'), np.asarray(labels, dtype='int32')
+
+        return np.asarray(encoded_words, dtype='int32'), np.asarray(encoded_sentences, dtype='int32'), np.asarray(labels, dtype='int32'), np.asarray(encoded_casings, dtype='int32')
+    
 
     def __encode_word(self, word: str) -> List[int]:
         encoded_word = [0 for _ in range(self.max_word_len)]
         unk_idx = len(CHAR_LOOKUP.keys()) + 1
         word = word[:self.max_word_len]
+        start = int((self.max_word_len - len(word))/2)
         for i, char in enumerate(word):
             code = CHAR_LOOKUP.get(char, unk_idx)
-            encoded_word[i] = code
+            encoded_word[start + i] = code
         return encoded_word
     
     def __encode_sentence(self, sentence: List[str]) -> List[int]:
@@ -69,6 +76,24 @@ class DataLoader:
             code = self.word_to_idx.get(word, unk_idx)
             encoded_sentence[i] = code
         return encoded_sentence
+    
+    def __get_casing(self, sentence: List[str]) -> List[int]:
+        encoded_casing= [0 for _ in range(self.max_sent_len)]
+        unk_idx = CASING_LOOKUP['other']
+        sentence = sentence[:self.max_sent_len]
+        for i, word in enumerate(sentence):
+            casing = ''
+            for char in word:
+                if char.isdigit():
+                    casing = 'numeric'
+            if word[0].isupper():
+                casing = 'initial_upper'
+            elif word.islower():
+                casing = 'all_lower'
+            elif word.isupper():
+                casing = 'all_upper'
+            encoded_casing[i] = CASING_LOOKUP.get(casing, unk_idx)
+        return encoded_casing
     
     def __split_tags_and_words(self, sentence: List):
         labels = []

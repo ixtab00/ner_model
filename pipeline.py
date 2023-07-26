@@ -3,9 +3,7 @@ from keras.utils import pad_sequences
 from keras.models import load_model
 from typing import Tuple, Dict, List
 import numpy as np
-from model import build_model
-import preprocessing
-from general import CHAR_LOOKUP
+from general import CHAR_LOOKUP, CASING_LOOKUP
 
 class EncodingStage(DataLoader):
     def __init__(self, max_word_len: int, max_sent_len: int, windex: Dict, decoder):
@@ -20,17 +18,21 @@ class EncodingStage(DataLoader):
         self.pass_data(data)
         encoded_sentences = []
         encoded_words = []
+        encoded_casings = []
         cur_sentences = self.__encode_sentence(data)
         encoded_sentences.append(cur_sentences)
         chars = []
+        cur_casing = self.__get_casing(data)
+        encoded_casings.append(cur_casing)
         for word in data:
             chars.append(self.__encode_word(word))
         encoded_words.append(chars)
         
         encoded_words = pad_sequences(encoded_words, self.max_sent_len, padding='post')
         encoded_sentences = pad_sequences(encoded_sentences, self.max_sent_len, padding='post')
+        encoded_casings = pad_sequences(encoded_casings, self.max_sent_len, padding='post')
 
-        return encoded_words, encoded_sentences
+        return encoded_words, encoded_sentences, encoded_casings
     
     def __encode_word(self, word: str) -> List[int]:
         encoded_word = [0 for _ in range(self.max_word_len)]
@@ -50,6 +52,24 @@ class EncodingStage(DataLoader):
             encoded_sentence[i] = code
         return encoded_sentence
     
+    def __get_casing(self, sentence: List[str]) -> List[int]:
+        encoded_casing= [0 for _ in range(self.max_sent_len)]
+        unk_idx = CASING_LOOKUP['other']
+        sentence = sentence[:self.max_sent_len]
+        for i, word in enumerate(sentence):
+            casing = ''
+            for char in word:
+                if char.isdigit():
+                    casing = 'numeric'
+            if word[0].isupper():
+                casing = 'initial_upper'
+            elif word.islower():
+                casing = 'all_lower'
+            elif word.isupper():
+                casing = 'all_upper'
+            encoded_casing[i] = CASING_LOOKUP.get(casing, unk_idx)
+        return encoded_casing
+    
     
     def link(self, stage):
         self.pass_to.append(stage)
@@ -64,18 +84,11 @@ class EncodingStage(DataLoader):
 
 class ComputingStage:
     def __init__(self, path: str):
-        data_loader = preprocessing.DataLoader(30, 50)
-        words, sents, labels = data_loader.preprocess_dataset('./dataset/ner_dataset.csv')
-        max_sent_len = data_loader.max_sent_len
-        max_word_len = data_loader.max_word_len
-        num_label_types = len(data_loader.tag_to_idx.keys())
-
-        self.model = build_model(len(CHAR_LOOKUP.keys()) + 3, len(data_loader.word_to_idx.keys()) + 4 , num_label_types + 1, max_sent_len, max_word_len)
-        self.model.load_weights(path)
+        self.model = load_model('model_weights_cnn_mod.h5')
     
     def forward(self, data: Tuple):
-        encoded_words, encoded_sentences = data
-        preds = self.model.predict([encoded_words, encoded_sentences])
+        encoded_words, encoded_sentences, encoded_casings = data
+        preds = self.model.predict([encoded_words, encoded_sentences, encoded_casings], verbose = 0)
         return preds
     
 
