@@ -84,7 +84,8 @@ class EncodingStage(DataLoader):
 
 class ComputingStage:
     def __init__(self, path: str):
-        self.model = load_model('model_weights_cnn_mod.h5')
+        self.model = load_model(path)
+        self.model.summary()
     
     def forward(self, data: Tuple):
         encoded_words, encoded_sentences, encoded_casings = data
