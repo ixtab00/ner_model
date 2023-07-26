@@ -1,35 +1,104 @@
-from typing import List, Dict
-from keras.preprocessing.sequence import pad_sequences
+import pandas as pd
+import numpy as np
+from typing import List
+from general import CHAR_LOOKUP, CASING_LOOKUP
+from tqdm import tqdm
+from keras.utils import pad_sequences
 
-class Preprocessor():
-    def __init__(self, sentence_maxlen: int):
-        self.sentnce_maxlen = sentence_maxlen
+class DataLoader:
+    def __init__(self, max_word_len: int, max_sent_len: int):
+        self.max_word_len = max_word_len
+        self.max_sent_len = max_sent_len
 
-    def __get_encodings(self, unique_words: List, unique_tags: List):
-        unique_words.append("PAD")
-        unique_words.append("UNK")
-        words_encoding = {word: index for word, index in zip(unique_words, range(len(unique_words)))}
-        tags_encoding = {tag: index for tag, index in zip(unique_tags, range(len(unique_tags)))}
+    def __load_data(self, path: str):
+        dataset = pd.read_csv(path, encoding='latin1')
+        dataset = dataset.fillna(method='ffill')
+        words = list(set(dataset["Word"].values.tolist()))
+        tags = list(set(dataset["Tag"].values.tolist()))
+        return dataset.groupby(
+            "Sentence #"
+        ).apply(lambda dataset: 
+                [
+                    (word, tag) for word, tag in zip(dataset["Word"].values.tolist(),
+                                                     dataset["Tag"].values.tolist())
+                ]
+            ).tolist(), words, tags
+    
+    def preprocess_dataset(self, path: str):
+        sentences, words, tags = self.__load_data(path)
+        self.words = words
+        self.tags = tags
+        self.word_to_idx = {word: idx for word, idx in zip(words, range(1, len(words) + 1))}
+        self.tag_to_idx = {tag: idx for tag, idx in zip(tags, range(1, len(tags) + 1))}
+        self.max_sent_len = min(max([len(sentence) for sentence in sentences]), self.max_sent_len)
+        self.max_word_len = min(max([len(word) for word in words]), self.max_word_len)
 
-        return words_encoding, tags_encoding
-    
-    def __to_sentences(self, sentences: List, words_encoding: Dict):
-        return [[words_encoding[entry[0]] for entry in sentence] for sentence in sentences]
-    
-    def __to_tags(self, sentences: List, tags_encoding: Dict):
-        return [[tags_encoding[entry[1]] for entry in sentence] for sentence in sentences]
-    
-    def __pad_sequence(self, sequence: List[List], value: int):
-        return pad_sequences(sequences = sequence,
-                             maxlen = self.sentnce_maxlen,
-                             padding = 'post',
-                             value = value)
-    
-    def process(self, sentences: List, unique_words: Dict, unique_tags: Dict):
-        self.words_encoding, self.tags_encoding = self.__get_encodings(unique_words, unique_tags)
-        transformed_sentences = self.__to_sentences(sentences, self.words_encoding)
-        tags = self.__to_tags(sentences, self.tags_encoding)
-        transformed_sentences = self.__pad_sequence(transformed_sentences, self.words_encoding["PAD"])
-        tags = self.__pad_sequence(tags, self.tags_encoding["O"])
+        labels = []
+        encoded_sentences = []
+        encoded_words = []
+        encoded_casings = []
+        for sentence in tqdm(sentences):
+            words, tags = self.__split_tags_and_words(sentence)
+            cur_labels = [self.tag_to_idx[tag] for tag in tags]
+            labels.append(cur_labels)
+            cur_sentences = self.__encode_sentence(words)
+            encoded_sentences.append(cur_sentences)
+            cur_casing = self.__get_casing(words)
+            encoded_casings.append(cur_casing)
+            chars = []
+            for word in words:
+                chars.append(self.__encode_word(word))
+            encoded_words.append(chars)
+        
+        encoded_words = pad_sequences(encoded_words, self.max_sent_len, padding='post')
+        encoded_sentences = pad_sequences(encoded_sentences, self.max_sent_len, padding='post')
+        encoded_casings = pad_sequences(encoded_casings, self.max_sent_len, padding='post')
+        labels = pad_sequences(labels, self.max_sent_len, padding='post', value=self.tag_to_idx['O'])
 
-        return transformed_sentences, tags
+        return np.asarray(encoded_words, dtype='int32'), np.asarray(encoded_sentences, dtype='int32'), np.asarray(labels, dtype='int32'), np.asarray(encoded_casings, dtype='int32')
+    
+
+    def __encode_word(self, word: str) -> List[int]:
+        encoded_word = [0 for _ in range(self.max_word_len)]
+        unk_idx = len(CHAR_LOOKUP.keys()) + 1
+        word = word[:self.max_word_len]
+        start = int((self.max_word_len - len(word))/2)
+        for i, char in enumerate(word):
+            code = CHAR_LOOKUP.get(char, unk_idx)
+            encoded_word[start + i] = code
+        return encoded_word
+    
+    def __encode_sentence(self, sentence: List[str]) -> List[int]:
+        encoded_sentence = [0 for _ in range(self.max_sent_len)]
+        unk_idx = len(self.words) + 2
+        sentence = sentence[:self.max_sent_len]   
+        for i, word in enumerate(sentence):
+            code = self.word_to_idx.get(word, unk_idx)
+            encoded_sentence[i] = code
+        return encoded_sentence
+    
+    def __get_casing(self, sentence: List[str]) -> List[int]:
+        encoded_casing= [0 for _ in range(self.max_sent_len)]
+        unk_idx = CASING_LOOKUP['other']
+        sentence = sentence[:self.max_sent_len]
+        for i, word in enumerate(sentence):
+            casing = ''
+            for char in word:
+                if char.isdigit():
+                    casing = 'numeric'
+            if word[0].isupper():
+                casing = 'initial_upper'
+            elif word.islower():
+                casing = 'all_lower'
+            elif word.isupper():
+                casing = 'all_upper'
+            encoded_casing[i] = CASING_LOOKUP.get(casing, unk_idx)
+        return encoded_casing
+    
+    def __split_tags_and_words(self, sentence: List):
+        labels = []
+        words = []
+        for entry in sentence:
+            words.append(entry[0])
+            labels.append(entry[1])
+        return words, labels

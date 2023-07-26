@@ -1,19 +1,114 @@
-from abc import ABC, abstractmethod
-from typing import Dict, Tuple
+from preprocessing import DataLoader
+from keras.utils import pad_sequences
+from keras.models import load_model
+from typing import Tuple, Dict, List
 import numpy as np
-import keras
-from keras.preprocessing.sequence import pad_sequences
-from json import loads
+from general import CHAR_LOOKUP, CASING_LOOKUP
 
-class PipelineStage(ABC):
-    def __init__(self):
+class EncodingStage(DataLoader):
+    def __init__(self, max_word_len: int, max_sent_len: int, windex: Dict, decoder):
+        super().__init__(max_word_len, max_sent_len)
         self.pass_to = []
         self.temp_data = []
+        self.word_to_idx = windex
+        self.link(decoder)
 
-    @abstractmethod
-    def compute(self, data):
-        return data
+    def forward(self, data: str):
+        data = data.split(' ')
+        self.pass_data(data)
+        encoded_sentences = []
+        encoded_words = []
+        encoded_casings = []
+        cur_sentences = self.__encode_sentence(data)
+        encoded_sentences.append(cur_sentences)
+        chars = []
+        cur_casing = self.__get_casing(data)
+        encoded_casings.append(cur_casing)
+        for word in data:
+            chars.append(self.__encode_word(word))
+        encoded_words.append(chars)
+        
+        encoded_words = pad_sequences(encoded_words, self.max_sent_len, padding='post')
+        encoded_sentences = pad_sequences(encoded_sentences, self.max_sent_len, padding='post')
+        encoded_casings = pad_sequences(encoded_casings, self.max_sent_len, padding='post')
 
+        return encoded_words, encoded_sentences, encoded_casings
+    
+    def __encode_word(self, word: str) -> List[int]:
+        encoded_word = [0 for _ in range(self.max_word_len)]
+        unk_idx = len(CHAR_LOOKUP.keys()) + 1
+        word = word[:self.max_word_len]
+        for i, char in enumerate(word):
+            code = CHAR_LOOKUP.get(char, unk_idx)
+            encoded_word[i] = code
+        return encoded_word
+    
+    def __encode_sentence(self, sentence: List[str]) -> List[int]:
+        encoded_sentence = [0 for _ in range(self.max_sent_len)]
+        unk_idx = len(self.word_to_idx.keys()) + 2
+        sentence = sentence[:self.max_sent_len]   
+        for i, word in enumerate(sentence):
+            code = self.word_to_idx.get(word, unk_idx)
+            encoded_sentence[i] = code
+        return encoded_sentence
+    
+    def __get_casing(self, sentence: List[str]) -> List[int]:
+        encoded_casing= [0 for _ in range(self.max_sent_len)]
+        unk_idx = CASING_LOOKUP['other']
+        sentence = sentence[:self.max_sent_len]
+        for i, word in enumerate(sentence):
+            casing = ''
+            for char in word:
+                if char.isdigit():
+                    casing = 'numeric'
+            if word[0].isupper():
+                casing = 'initial_upper'
+            elif word.islower():
+                casing = 'all_lower'
+            elif word.isupper():
+                casing = 'all_upper'
+            encoded_casing[i] = CASING_LOOKUP.get(casing, unk_idx)
+        return encoded_casing
+    
+    
+    def link(self, stage):
+        self.pass_to.append(stage)
+
+    def pass_data(self, data):
+        for stage in self.pass_to:
+            stage.temp_data.append(data)
+    
+    def clear_state(self):
+        self.temp_data.clear()
+    
+
+class ComputingStage:
+    def __init__(self, path: str):
+        self.model = load_model(path)
+        self.model.summary()
+    
+    def forward(self, data: Tuple):
+        encoded_words, encoded_sentences, encoded_casings = data
+        preds = self.model.predict([encoded_words, encoded_sentences, encoded_casings], verbose = 0)
+        return preds
+    
+
+class DecodingStage:
+    def __init__(self, tags_encoding: Dict):
+        self.index_to_tag = {index: tag for tag, index in tags_encoding.items()}
+        self.pass_to = []
+        self.temp_data = []
+    
+    def forward(self, data):
+        preds = np.argmax(data, axis=-1)
+        preds = np.reshape(preds, (50))
+        decoded_preds = []
+        for pred in preds:
+            decoded_preds.append(self.index_to_tag[pred])
+        output = [(self.temp_data[0][i], decoded_preds[i]) for i in range(len(self.temp_data[0]))]
+        self.temp_data.clear()
+        return output
+    
     def link(self, stage):
         self.pass_to.append(stage)
 
@@ -32,58 +127,6 @@ class Pipeline():
     def pipeline(self, data: str, mode = "default"):
         if mode == "default":
             for stage in self.stages:
-                data = stage.compute(data)
+                data = stage.forward(data)
             
         return data
-        
-
-class PSEncode(PipelineStage):
-    def __init__(self, words_encoding: Dict, decoder_stage: PipelineStage):
-        super().__init__()
-        self.words_encoding = words_encoding
-        self.unk_index = words_encoding.get("UNK")
-
-        self.link(decoder_stage)
-        #with open(path_to_model_config) as file:
-            #self.model_config = loads(file.read())
-        self.model_config = {'maxlen':35}
-
-    def compute(self, data: str):
-        assert type(data) == type('')
-        data = data.split(' ')
-        while '' in data:
-            data.remove('')
-
-        self.pass_data(data)
-        data = [[self.words_encoding.get(word, self.unk_index) for word in data],]
-        data = pad_sequences(data, maxlen=self.model_config['maxlen'], padding='post', value=self.words_encoding["PAD"])[0]
-        return data.reshape((1, self.model_config['maxlen']))
-    
-
-class PSCompute(PipelineStage):
-    def __init__(self, path_to_weights: str):
-        super().__init__()
-        self.model = keras.models.load_model(path_to_weights)
-
-    def compute(self, data: np.ndarray):
-        return self.model.predict(data)
-    
-
-class PSDecode(PipelineStage):
-    def __init__(self, tags_encoding: Dict):
-        super().__init__()
-        self.index_to_tag = {index: tag for tag, index in tags_encoding.items()}
-    
-    def compute(self, data):
-        preds = np.argmax(data, axis=-1)
-        preds = np.reshape(preds, (35))
-        decoded_preds = []
-        for pred in preds:
-            decoded_preds.append(self.index_to_tag[pred])
-        output = [(self.temp_data[0][i], decoded_preds[i]) for i in range(len(self.temp_data[0]))]
-        self.temp_data.clear()
-        return output
-
-
-
-pipe = Pipeline()
