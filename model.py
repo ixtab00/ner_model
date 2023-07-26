@@ -1,6 +1,7 @@
 from keras.models import Model
 from keras.layers import Input, TimeDistributed, LSTM, Bidirectional, Dense, Conv1D, MaxPooling1D, Embedding, Flatten, Concatenate, Dropout
 import numpy as np
+from keras.initializers import RandomUniform
 
 def build_model(
         char_vocab_size: int,
@@ -13,22 +14,23 @@ def build_model(
         word_emb_dim = 64,
         conv_filters = 32,
         conv_kernel_size = 3,
-        dropot_rate = 0.4,
-        lstm_units = 256
+        dropot_rate = 0.55,
+        lstm_units = 256,
+        pool_size = 28
 ):
     char_input = Input((max_sent_len, max_word_len,), name="char_input")
     word_input = Input((max_sent_len,), name="word_input")
     casing_input = Input((max_sent_len,), name="casing_input")
     casing = Embedding(casing_size, casing_size, weights = [np.identity(casing_size)], trainable=False)(casing_input)
 
-    chars = TimeDistributed(Embedding(input_dim=char_vocab_size, output_dim=char_emb_dim))(char_input)
+    chars = TimeDistributed(Embedding(input_dim=char_vocab_size, output_dim=char_emb_dim, embeddings_initializer=RandomUniform(minval=-0.5, maxval=0.5)))(char_input)
     chars = Dropout(dropot_rate)(chars)
     chars = TimeDistributed(Conv1D(
         filters=conv_filters,
         kernel_size=conv_kernel_size,
         activation='tanh'
     ))(chars)
-    chars = TimeDistributed(MaxPooling1D())(chars)
+    chars = TimeDistributed(MaxPooling1D(pool_size=pool_size))(chars)
     chars = Dropout(dropot_rate)(chars)
     chars = TimeDistributed(Flatten())(chars)
 

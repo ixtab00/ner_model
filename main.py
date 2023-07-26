@@ -10,7 +10,7 @@ def main():
         tindex = loads(file.read())
 
     decoder_stage = pipeline.DecodingStage(tindex)
-    encoder_stage = pipeline.EncodingStage(30, 50, windex, decoder_stage)
+    encoder_stage = pipeline.EncodingStage(40, 50, windex, decoder_stage)
     main_stage = pipeline.ComputingStage('model_weights_cnn_mod.h5')
 
     pipe = pipeline.Pipeline(encoder_stage, main_stage, decoder_stage)
